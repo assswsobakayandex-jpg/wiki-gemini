@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "src/worker.mjs": {
-      "runtime": "nodejs@18.x"
-    }
-  }
-}
