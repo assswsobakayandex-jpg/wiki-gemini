@@ -1,64 +1,63 @@
 import { Buffer } from "node:buffer";
 
-// CORS headers - разрешаем ваш сайт
 const corsHeaders = {
   "Access-Control-Allow-Origin": "https://ru.wiki-md.com",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-const handleOPTIONS = async () => {
-  return new Response(null, {
-    status: 204,
-    headers: corsHeaders
-  });
-};
-
-const fixCors = ({ headers, status, statusText }) => {
-  headers = new Headers(headers);
-  Object.entries(corsHeaders).forEach(([key, value]) => {
-    headers.set(key, value);
-  });
-  return { headers, status, statusText };
-};
-
-class HttpError extends Error {
-  constructor(message, status) {
-    super(message);
-    this.name = this.constructor.name;
-    this.status = status;
-  }
-}
-
 export default {
   async fetch(request) {
+    // OPTIONS запросы
     if (request.method === "OPTIONS") {
-      return handleOPTIONS();
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders
+      });
     }
-    
-    const errHandler = (err) => {
-      console.error(err);
-      return new Response(err.message, fixCors({ status: err.status ?? 500 }));
-    };
-    
+
+    // Только POST для API
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { 
+        status: 405,
+        headers: corsHeaders
+      });
+    }
+
+    // Проверяем путь
+    const url = new URL(request.url);
+    if (!url.pathname.includes("/v1/chat/completions")) {
+      return new Response("Not found", { 
+        status: 404,
+        headers: corsHeaders
+      });
+    }
+
     try {
-      const auth = request.headers.get("Authorization");
-      const apiKey = auth?.split(" ")[1];
-      
-      const { pathname } = new URL(request.url);
-      
-      // Проверяем путь - должен быть /v1/chat/completions
-      if (pathname !== "/v1/chat/completions") {
-        throw new HttpError("Not Found", 404);
+      // ИСПРАВЛЕНО: получаем заголовки через request.headers (объект)
+      const authHeader = request.headers.get 
+        ? request.headers.get("Authorization")
+        : request.headers["authorization"]; // для Vercel
+
+      const apiKey = authHeader?.split(" ")[1];
+
+      if (!apiKey) {
+        throw new Error("No API key provided");
       }
-      
-      if (request.method !== "POST") {
-        throw new HttpError("Method not allowed", 405);
-      }
-      
+
+      // Получаем тело запроса
       const body = await request.json();
       
-      // Отправляем запрос к Gemini API
+      console.log("Получен запрос. API Key:", apiKey.substring(0, 10) + "...");
+
+      // Отправляем в Gemini
+      const geminiBody = {
+        contents: body.messages.map(msg => ({
+          role: msg.role === "assistant" ? "model" : msg.role,
+          parts: [{ text: msg.content }]
+        }))
+      };
+
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
         {
@@ -66,19 +65,19 @@ export default {
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            contents: body.messages.map(msg => ({
-              role: msg.role === "assistant" ? "model" : msg.role,
-              parts: [{ text: msg.content }]
-            }))
-          })
+          body: JSON.stringify(geminiBody)
         }
       );
-      
+
       const data = await response.json();
       
-      // Преобразуем ответ в OpenAI формат
-      const openAIResponse = {
+      if (!data.candidates || !data.candidates[0]) {
+        console.error("Странный ответ от Gemini:", data);
+        throw new Error("Нет ответа от Gemini");
+      }
+
+      // Преобразуем в OpenAI формат
+      const result = {
         id: "chatcmpl-" + Math.random().toString(36).substring(2, 15),
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
@@ -90,21 +89,29 @@ export default {
             content: data.candidates[0].content.parts[0].text
           },
           finish_reason: "stop"
-        }],
-        usage: {
-          prompt_tokens: 0,
-          completion_tokens: 0,
-          total_tokens: 0
-        }
+        }]
       };
-      
-      return new Response(JSON.stringify(openAIResponse), fixCors({
-        headers: { "Content-Type": "application/json" },
-        status: 200
-      }));
-      
-    } catch (err) {
-      return errHandler(err);
+
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
+
+    } catch (error) {
+      console.error("Ошибка в прокси:", error);
+      return new Response(JSON.stringify({ 
+        error: error.message,
+        stack: error.stack 
+      }), {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
     }
   }
 };
