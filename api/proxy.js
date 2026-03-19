@@ -13,7 +13,6 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Читаем тело запроса
     let body = '';
     req.on('data', chunk => { body += chunk; });
     await new Promise((resolve, reject) => {
@@ -28,13 +27,11 @@ module.exports = async (req, res) => {
       return res.status(401).json({ error: 'No API key provided' });
     }
 
-    // Сначала получаем список доступных моделей
     const modelsResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
     );
     const modelsData = await modelsResponse.json();
     
-    // Ищем модель, которая поддерживает generateContent
     const validModel = modelsData.models.find(m => 
       m.name.includes('gemini') && 
       m.supportedGenerationMethods?.includes('generateContent')
@@ -47,19 +44,18 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log('Using model:', validModel.name);
-
-    // Отправляем запрос к найденной модели
+    // ✅ ИСПРАВЛЕНО: правильный формат для Gemini API
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/${validModel.name}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: messages.map(msg => ({
-            role: msg.role === 'assistant' ? 'model' : msg.role,
-            parts: [{ text: msg.content }]
-          }))
+          contents: [{
+            parts: messages.map(msg => ({
+              text: msg.content
+            }))
+          }]
         })
       }
     );
