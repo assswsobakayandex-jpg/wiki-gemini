@@ -23,6 +23,12 @@ module.exports = async (req, res) => {
       return res.status(401).json({ error: 'No API key provided' });
     }
 
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: 'Invalid messages format' });
+    }
+
+    console.log('Sending to Gemini:', JSON.stringify({ messages }));
+
     // Отправляем запрос к Gemini
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
@@ -39,6 +45,24 @@ module.exports = async (req, res) => {
     );
 
     const data = await response.json();
+    console.log('Gemini response:', JSON.stringify(data));
+
+    // Проверяем, не вернул ли Gemini ошибку
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: 'Gemini API error',
+        details: data.error?.message || 'Unknown error'
+      });
+    }
+
+    // Проверяем структуру ответа
+    if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+      console.error('Unexpected Gemini response structure:', data);
+      return res.status(500).json({
+        error: 'Invalid response from Gemini',
+        details: data
+      });
+    }
 
     // Преобразуем в формат OpenAI
     const result = {
@@ -59,7 +83,11 @@ module.exports = async (req, res) => {
     res.json(result);
 
   } catch (error) {
-    console.error('Proxy error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Proxy internal error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message,
+      stack: error.stack
+    });
   }
 };
