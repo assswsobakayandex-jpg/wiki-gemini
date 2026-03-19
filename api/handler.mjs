@@ -1,5 +1,5 @@
 export const config = {
-  runtime: "nodejs@18.x"
+  runtime: "nodejs"
 };
 
 import worker from "../src/worker.mjs";
