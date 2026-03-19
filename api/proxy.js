@@ -1,8 +1,7 @@
-// Рабочая версия для Node.js на Vercel
 module.exports = async (req, res) => {
-  // Устанавливаем CORS-заголовки
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  // Устанавливаем CORS-заголовки для вашего сайта
+  res.setHeader('Access-Control-Allow-Origin', 'https://ru.wiki-md.com');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   // Отвечаем на preflight OPTIONS запрос
@@ -11,11 +10,56 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // Простой JSON-ответ для проверки
-  res.status(200).json({
-    status: 'ok',
-    message: 'Proxy is working!',
-    url: req.url,
-    method: req.method
-  });
+  // Разрешаем только POST
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { messages } = req.body;
+    const apiKey = req.headers.authorization?.split(' ')[1];
+
+    if (!apiKey) {
+      return res.status(401).json({ error: 'No API key provided' });
+    }
+
+    // Отправляем запрос к Gemini
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: messages.map(msg => ({
+            role: msg.role === 'assistant' ? 'model' : msg.role,
+            parts: [{ text: msg.content }]
+          }))
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    // Преобразуем в формат OpenAI
+    const result = {
+      id: 'chatcmpl-' + Math.random().toString(36).substring(2, 15),
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: 'gemini-1.5-flash',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: data.candidates[0].content.parts[0].text
+        },
+        finish_reason: 'stop'
+      }]
+    };
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('Proxy error:', error);
+    res.status(500).json({ error: error.message });
+  }
 };
