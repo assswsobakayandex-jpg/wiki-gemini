@@ -1,61 +1,38 @@
 module.exports = async (req, res) => {
+  // CORS заголовки
   res.setHeader('Access-Control-Allow-Origin', 'https://ru.wiki-md.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+  // OPTIONS запрос
   if (req.method === 'OPTIONS') {
     res.status(204).end();
     return;
   }
 
+  // Только POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    await new Promise((resolve, reject) => {
-      req.on('end', resolve);
-      req.on('error', reject);
-    });
-
-    const { messages } = JSON.parse(body);
+    const { messages } = req.body;
     const apiKey = req.headers.authorization?.split(' ')[1];
 
     if (!apiKey) {
       return res.status(401).json({ error: 'No API key provided' });
     }
 
-    const modelsResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-    );
-    const modelsData = await modelsResponse.json();
-    
-    const validModel = modelsData.models.find(m => 
-      m.name.includes('gemini') && 
-      m.supportedGenerationMethods?.includes('generateContent')
-    );
-
-    if (!validModel) {
-      return res.status(500).json({ 
-        error: 'No suitable Gemini model found',
-        availableModels: modelsData.models.map(m => m.name)
-      });
-    }
-
-    // ✅ ИСПРАВЛЕНО: правильный формат для Gemini API
+    // Простой запрос к Gemini
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${validModel.name}:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{
-            parts: messages.map(msg => ({
-              text: msg.content
-            }))
-          }]
+          contents: messages.map(msg => ({
+            parts: [{ text: msg.content }]
+          }))
         })
       }
     );
@@ -69,18 +46,12 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Простой ответ
     const result = {
-      id: 'chatcmpl-' + Math.random().toString(36).substring(2, 15),
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: validModel.name,
       choices: [{
-        index: 0,
         message: {
-          role: 'assistant',
           content: data.candidates[0].content.parts[0].text
-        },
-        finish_reason: 'stop'
+        }
       }]
     };
 
@@ -88,10 +59,6 @@ module.exports = async (req, res) => {
 
   } catch (error) {
     console.error('Proxy error:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error.message,
-      stack: error.stack
-    });
+    res.status(500).json({ error: error.message });
   }
 };
