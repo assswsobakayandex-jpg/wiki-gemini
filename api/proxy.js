@@ -1,5 +1,5 @@
 module.exports = async (req, res) => {
-  // Устанавливаем CORS-заголовки для вашего сайта
+  // Устанавливаем CORS-заголовки
   res.setHeader('Access-Control-Allow-Origin', 'https://ru.wiki-md.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -16,7 +16,16 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { messages } = req.body;
+    // ✅ Правильно получаем тело запроса
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    
+    await new Promise((resolve, reject) => {
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+
+    const { messages } = JSON.parse(body);
     const apiKey = req.headers.authorization?.split(' ')[1];
 
     if (!apiKey) {
@@ -27,26 +36,23 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Invalid messages format' });
     }
 
-    console.log('Sending to Gemini:', JSON.stringify({ messages }));
-
     // Отправляем запрос к Gemini
     const response = await fetch(
-  `https://generativelanguage.googleapis.com/v1/models:generateContent?key=${apiKey}`,
-  {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: messages.map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : msg.role,
-        parts: [{ text: msg.content }]
-      }))
-    })
-  }
-);
-    const data = await response.json();
-    console.log('Gemini response:', JSON.stringify(data));
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: messages.map(msg => ({
+            role: msg.role === 'assistant' ? 'model' : msg.role,
+            parts: [{ text: msg.content }]
+          }))
+        })
+      }
+    );
 
-    // Проверяем, не вернул ли Gemini ошибку
+    const data = await response.json();
+
     if (!response.ok) {
       return res.status(response.status).json({
         error: 'Gemini API error',
@@ -54,16 +60,13 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Проверяем структуру ответа
     if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-      console.error('Unexpected Gemini response structure:', data);
       return res.status(500).json({
         error: 'Invalid response from Gemini',
         details: data
       });
     }
 
-    // Преобразуем в формат OpenAI
     const result = {
       id: 'chatcmpl-' + Math.random().toString(36).substring(2, 15),
       object: 'chat.completion',
@@ -82,7 +85,7 @@ module.exports = async (req, res) => {
     res.json(result);
 
   } catch (error) {
-    console.error('Proxy internal error:', error);
+    console.error('Proxy error:', error);
     res.status(500).json({
       error: 'Internal server error',
       message: error.message,
