@@ -1,15 +1,17 @@
+// api/proxy.js — версия с задержкой между запросами
+let lastRequestTime = 0;
+const MIN_INTERVAL = 4000; // 4 секунды между запросами к Google
+
 module.exports = async (req, res) => {
-  // Устанавливаем CORS-заголовки для вашего сайта
+  // CORS заголовки
   res.setHeader('Access-Control-Allow-Origin', 'https://ru.wiki-md.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // Обработка OPTIONS-запроса (preflight)
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
-  // Разрешаем только POST-запросы для API
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Метод не разрешен. Используйте POST.' });
   }
@@ -22,10 +24,17 @@ module.exports = async (req, res) => {
       return res.status(401).json({ error: 'API ключ не предоставлен' });
     }
 
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Неверный формат запроса' });
+    // ЗАДЕРЖКА МЕЖДУ ЗАПРОСАМИ
+    const now = Date.now();
+    const timeSinceLastRequest = now - lastRequestTime;
+    if (timeSinceLastRequest < MIN_INTERVAL) {
+      const waitTime = MIN_INTERVAL - timeSinceLastRequest;
+      console.log(`⏳ Ждём ${waitTime}мс перед следующим запросом...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
+    lastRequestTime = Date.now();
 
+    // Запрос к Gemini
     const geminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-001:generateContent?key=${apiKey}`,
       {
@@ -42,6 +51,7 @@ module.exports = async (req, res) => {
     const geminiData = await geminiResponse.json();
 
     if (!geminiResponse.ok) {
+      console.error('Ошибка Gemini:', geminiData);
       return res.status(geminiResponse.status).json({
         error: 'Ошибка Gemini API',
         details: geminiData.error?.message
