@@ -1,1 +1,85 @@
+// api/gigachat.js — прокси для GigaChat
+let gigaToken = null;
+let tokenExpiry = 0;
 
+async function getGigaChatToken(clientSecret) {
+  const now = Date.now();
+  if (gigaToken && now < tokenExpiry) {
+    return gigaToken;
+  }
+  
+  const response = await fetch('https://ngw.devices.sberbank.ru:9443/api/v2/oauth', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json',
+      'RqUID': crypto.randomUUID(),
+      'Authorization': `Basic ${clientSecret}`
+    },
+    body: 'scope=GIGACHAT_API_PERS'
+  });
+  
+  const data = await response.json();
+  gigaToken = data.access_token;
+  tokenExpiry = now + (data.expires_at || 30 * 60 * 1000);
+  return gigaToken;
+}
+
+module.exports = async (req, res) => {
+  // CORS для вашего сайта
+  res.setHeader('Access-Control-Allow-Origin', 'https://ru.wiki-md.com');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Метод не разрешен. Используйте POST.' });
+  }
+
+  try {
+    const { messages } = req.body;
+    const clientSecret = 'MDE5ZDBhYzItNGQ5MS03ZWQ3LTk0ZDAtMDE5MmNiYjFkZGMwOjVmNmYxNmIzLWVlZmQtNDFjNC1hYjdiLTAyYzUxOWY4NzA3MQ==';
+    
+    const token = await getGigaChatToken(clientSecret);
+    
+    const gigachatResponse = await fetch('https://gigachat.devices.sberbank.ru/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        model: 'GigaChat-2-Lite',
+        messages: messages,
+        temperature: 0.7,
+        max_tokens: 2000,
+        stream: false
+      })
+    });
+    
+    const data = await gigachatResponse.json();
+    
+    if (!gigachatResponse.ok) {
+      return res.status(gigachatResponse.status).json({
+        error: 'Ошибка GigaChat API',
+        details: data
+      });
+    }
+    
+    res.json({
+      choices: [{
+        message: {
+          content: data.choices[0].message.content
+        }
+      }]
+    });
+    
+  } catch (error) {
+    console.error('Ошибка в прокси GigaChat:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
