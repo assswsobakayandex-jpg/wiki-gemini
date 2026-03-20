@@ -1,8 +1,16 @@
-// api/gigachat.js
+// api/gigachat.js — исправленная версия
 let gigaToken = null;
 let tokenExpiry = 0;
 
-// Функция получения токена
+// Простая генерация UUID для Vercel
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 async function getGigaChatToken(clientSecret) {
   const now = Date.now();
   if (gigaToken && now < tokenExpiry) {
@@ -15,14 +23,15 @@ async function getGigaChatToken(clientSecret) {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
-        'RqUID': crypto.randomUUID(),
+        'RqUID': generateUUID(),
         'Authorization': `Basic ${clientSecret}`
       },
       body: 'scope=GIGACHAT_API_PERS'
     });
     
     if (!response.ok) {
-      throw new Error(`Token error: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`Token error ${response.status}: ${errorText}`);
     }
     
     const data = await response.json();
@@ -36,17 +45,15 @@ async function getGigaChatToken(clientSecret) {
 }
 
 module.exports = async (req, res) => {
-  // CORS для вашего сайта
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', 'https://ru.wiki-md.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // OPTIONS запрос
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
-  // Только POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Метод не разрешен. Используйте POST.' });
   }
@@ -61,6 +68,8 @@ module.exports = async (req, res) => {
     const clientSecret = 'MDE5ZDBhYzItNGQ5MS03ZWQ3LTk0ZDAtMDE5MmNiYjFkZGMwOjVmNmYxNmIzLWVlZmQtNDFjNC1hYjdiLTAyYzUxOWY4NzA3MQ==';
     
     const token = await getGigaChatToken(clientSecret);
+    
+    console.log('Токен получен, отправляем запрос к GigaChat...');
     
     const gigachatResponse = await fetch('https://gigachat.devices.sberbank.ru/api/v1/chat/completions', {
       method: 'POST',
