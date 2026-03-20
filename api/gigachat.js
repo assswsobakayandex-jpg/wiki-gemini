@@ -1,28 +1,38 @@
-// api/gigachat.js — прокси для GigaChat
+// api/gigachat.js
 let gigaToken = null;
 let tokenExpiry = 0;
 
+// Функция получения токена
 async function getGigaChatToken(clientSecret) {
   const now = Date.now();
   if (gigaToken && now < tokenExpiry) {
     return gigaToken;
   }
   
-  const response = await fetch('https://ngw.devices.sberbank.ru:9443/api/v2/oauth', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/json',
-      'RqUID': crypto.randomUUID(),
-      'Authorization': `Basic ${clientSecret}`
-    },
-    body: 'scope=GIGACHAT_API_PERS'
-  });
-  
-  const data = await response.json();
-  gigaToken = data.access_token;
-  tokenExpiry = now + (data.expires_at || 30 * 60 * 1000);
-  return gigaToken;
+  try {
+    const response = await fetch('https://ngw.devices.sberbank.ru:9443/api/v2/oauth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'RqUID': crypto.randomUUID(),
+        'Authorization': `Basic ${clientSecret}`
+      },
+      body: 'scope=GIGACHAT_API_PERS'
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Token error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    gigaToken = data.access_token;
+    tokenExpiry = now + (data.expires_at || 30 * 60 * 1000);
+    return gigaToken;
+  } catch (error) {
+    console.error('Ошибка получения токена:', error);
+    throw error;
+  }
 }
 
 module.exports = async (req, res) => {
@@ -31,16 +41,23 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+  // OPTIONS запрос
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
+  // Только POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Метод не разрешен. Используйте POST.' });
   }
 
   try {
     const { messages } = req.body;
+    
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: 'Неверный формат запроса' });
+    }
+    
     const clientSecret = 'MDE5ZDBhYzItNGQ5MS03ZWQ3LTk0ZDAtMDE5MmNiYjFkZGMwOjVmNmYxNmIzLWVlZmQtNDFjNC1hYjdiLTAyYzUxOWY4NzA3MQ==';
     
     const token = await getGigaChatToken(clientSecret);
@@ -64,6 +81,7 @@ module.exports = async (req, res) => {
     const data = await gigachatResponse.json();
     
     if (!gigachatResponse.ok) {
+      console.error('GigaChat error:', data);
       return res.status(gigachatResponse.status).json({
         error: 'Ошибка GigaChat API',
         details: data
